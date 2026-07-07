@@ -1,0 +1,284 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Asset {
+  BTC
+  USDT
+}
+
+enum Network {
+  BTC
+  ERC20
+  TRC20
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum StakePlanType {
+  FLEXIBLE
+  LOCKED
+}
+
+enum StakeStatus {
+  ACTIVE
+  MATURED
+  WITHDRAWN
+}
+
+enum DepositStatus {
+  PENDING
+  CONFIRMED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum WithdrawalSourceType {
+  PRINCIPAL
+  EARNINGS
+}
+
+enum LedgerEntryType {
+  CREDIT
+  DEBIT
+}
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  phone             String?  @unique
+  passwordHash      String
+  emailVerified     Boolean  @default(false)
+  kycStatus         KycStatus @default(PENDING)
+  role              Role     @default(USER)
+  twoFactorSecret   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  depositAddresses  DepositAddress[]
+  deposits          Deposit[]
+  stakes            Stake[]
+  withdrawalRequests WithdrawalRequest[]
+  balanceLedgerEntries BalanceLedgerEntry[]
+  userBalances      UserBalance[]
+  verificationTokens VerificationToken[]
+  kycSubmissions    KycSubmission[]
+  auditLogsAsActor  AuditLog[] @relation("ActorAuditLogs")
+  reviewedWithdrawals WithdrawalRequest[] @relation("ReviewedWithdrawals")
+  reviewedKycSubmissions KycSubmission[] @relation("ReviewedKycSubmissions")
+
+  @@index([email])
+  @@index([kycStatus])
+  @@index([role])
+}
+
+model DepositAddress {
+  id        String   @id @default(uuid())
+  userId    String
+  asset     Asset
+  network   Network
+  address   String
+  createdAt DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deposits Deposit[]
+
+  @@unique([userId, asset, network])
+  @@index([address])
+}
+
+model Deposit {
+  id                String        @id @default(uuid())
+  userId            String
+  depositAddressId  String
+  asset             Asset
+  network           Network
+  amount            Decimal       @db.Decimal(28, 18)
+  txHash            String
+  confirmations     Int           @default(0)
+  status            DepositStatus @default(PENDING)
+  creditedAt        DateTime?
+  createdAt         DateTime      @default(now())
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  depositAddress DepositAddress @relation(fields: [depositAddressId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([txHash])
+}
+
+model UserBalance {
+  id        String   @id @default(uuid())
+  userId    String
+  asset     Asset
+  available Decimal  @db.Decimal(28, 18) @default(0.0)
+  staked    Decimal  @db.Decimal(28, 18) @default(0.0)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, asset])
+  @@index([userId])
+}
+
+model BalanceLedgerEntry {
+  id         String          @id @default(uuid())
+  userId     String
+  asset      Asset
+  amount     Decimal         @db.Decimal(28, 18)
+  entryType  LedgerEntryType
+  sourceType String? // DEPOSIT, STAKE, EARNINGS, WITHDRAWAL, etc.
+  sourceId   String?
+  createdAt  DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([asset])
+  @@index([createdAt])
+}
+
+model StakePlan {
+  id                     String        @id @default(uuid())
+  name                   String
+  type                   StakePlanType
+  termDays               Int?
+  dailyRatePercent       Decimal       @db.Decimal(10, 6)
+  earlyExitPenaltyPercent Decimal?     @db.Decimal(10, 6)
+  active                 Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  stakes Stake[]
+
+  @@index([active])
+  @@index([type])
+}
+
+model Stake {
+  id              String      @id @default(uuid())
+  userId          String
+  stakePlanId     String
+  principal       Decimal     @db.Decimal(28, 18)
+  asset           Asset
+  startDate       DateTime    @default(now())
+  maturityDate    DateTime?
+  status          StakeStatus @default(ACTIVE)
+  accruedEarnings Decimal     @db.Decimal(28, 18) @default(0.0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stakePlan      StakePlan             @relation(fields: [stakePlanId], references: [id], onDelete: Restrict)
+  earningsEntries EarningsLedgerEntry[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([stakePlanId])
+}
+
+model EarningsLedgerEntry {
+  id        String   @id @default(uuid())
+  stakeId   String
+  date      DateTime @default(now())
+  amount    Decimal  @db.Decimal(28, 18)
+  createdAt DateTime @default(now())
+
+  stake Stake @relation(fields: [stakeId], references: [id], onDelete: Cascade)
+
+  @@index([stakeId])
+  @@index([date])
+}
+
+model WithdrawalRequest {
+  id          String              @id @default(uuid())
+  userId      String
+  asset       Asset
+  amount      Decimal             @db.Decimal(28, 18)
+  sourceType  WithdrawalSourceType
+  status      WithdrawalStatus    @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  reason      String?
+  txHash      String?
+  createdAt   DateTime            @default(now())
+
+  user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User?   @relation("ReviewedWithdrawals", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([reviewedBy])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  targetType String
+  targetId   String?
+  metadata   Json?    @db.Json
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([targetType])
+  @@index([targetId])
+  @@index([createdAt])
+}
+
+model VerificationToken {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [email], references: [email], onDelete: Cascade)
+
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model KycSubmission {
+  id                String   @id @default(uuid())
+  userId            String
+  status            KycStatus @default(PENDING)
+  providerReference String?  @unique
+  payload           Json?    @db.Json
+  decisionReason    String?
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user     User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("ReviewedKycSubmissions", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([reviewedBy])
+  @@index([providerReference])
+}

@@ -1,0 +1,19 @@
+{
+  "name": "cryptvest",
+  "private": true,
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r --parallel run dev",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "db:generate": "pnpm --filter @cryptvest/db db:generate",
+    "db:push": "pnpm --filter @cryptvest/db db:push",
+    "db:migrate": "pnpm --filter @cryptvest/db db:migrate",
+    "db:studio": "pnpm --filter @cryptvest/db db:studio"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.4",
+    "typescript": "^5.4.5"
+  },
+  "packageManager": "pnpm@9.1.0"
+}
