@@ -11,9 +11,11 @@ export const adminWithdrawalsRouter = Router();
 
 adminWithdrawalsRouter.use(requireAdminAuth);
 
+const MAX_WITHDRAWAL_AMOUNT = 50000;
+
 const requestSchema = z.object({
   asset: z.nativeEnum(Asset),
-  amount: z.number().positive(),
+  amount: z.number().positive().max(MAX_WITHDRAWAL_AMOUNT),
   sourceType: z.nativeEnum(WithdrawalSourceType),
   destinationAddress: z.string().min(10),
 });

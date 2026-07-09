@@ -1,8 +1,9 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "@cryptvest/db";
-import { Asset, Network } from "@cryptvest/shared";
+import { Asset, Network, DepositStatus } from "@cryptvest/shared";
 import { generateBtcAddress, generateEthAddress } from "../lib/blockchain";
+import { audit } from "../lib/audit";
 import type { AuthRequest } from "../middleware/auth";
 
 export const depositsRouter = Router();
@@ -25,7 +26,9 @@ depositsRouter.post("/address", async (req: AuthRequest, res: Response) => {
     [Asset.USDT]: [Network.ERC20],
   };
   if (!validCombos[asset].includes(network)) {
-    return res.status(400).json({ error: "Unsupported asset/network combination" });
+    return res
+      .status(400)
+      .json({ error: "Unsupported asset/network combination" });
   }
 
   const existing = await prisma.depositAddress.findUnique({
@@ -71,4 +74,55 @@ depositsRouter.get("/balances", async (req: AuthRequest, res: Response) => {
     where: { userId: req.user!.id },
   });
   return res.json({ balances });
+});
+
+const claimDepositSchema = z.object({
+  asset: z.nativeEnum(Asset),
+  network: z.nativeEnum(Network),
+  amount: z.number().positive(),
+  txHash: z.string().optional(),
+});
+
+// User self-reports a deposit after sending funds; admin reviews and confirms it
+// in the Admin Deposits queue before the balance is credited.
+depositsRouter.post("/claim", async (req: AuthRequest, res: Response) => {
+  const parse = claimDepositSchema.safeParse(req.body);
+  if (!parse.success) return res.status(400).json({ error: "Invalid input" });
+
+  const { asset, network, amount, txHash } = parse.data;
+  const userId = req.user!.id;
+
+  const depositAddress = await prisma.depositAddress.findUnique({
+    where: { userId_asset_network: { userId, asset, network } },
+  });
+
+  if (!depositAddress) {
+    return res.status(400).json({
+      error:
+        "No deposit address found for this asset. Please generate one first.",
+    });
+  }
+
+  const deposit = await prisma.deposit.create({
+    data: {
+      userId,
+      depositAddressId: depositAddress.id,
+      asset,
+      network,
+      amount,
+      txHash: txHash ?? `USER-CLAIM-${Date.now()}`,
+      confirmations: 0,
+      status: DepositStatus.PENDING,
+    },
+  });
+
+  await audit({
+    actorId: userId,
+    action: "DEPOSIT_USER_CLAIMED",
+    targetType: "Deposit",
+    targetId: deposit.id,
+    metadata: { asset, network, amount, txHash },
+  });
+
+  return res.status(201).json({ deposit });
 });
