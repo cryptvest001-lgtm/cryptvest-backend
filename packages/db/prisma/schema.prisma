@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -62,6 +63,17 @@ enum LedgerEntryType {
   DEBIT
 }
 
+enum TicketStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+enum ChatRole {
+  USER
+  ADMIN
+}
+
 model User {
   id                String   @id @default(uuid())
   email             String   @unique
@@ -71,6 +83,9 @@ model User {
   kycStatus         KycStatus @default(PENDING)
   role              Role     @default(USER)
   twoFactorSecret   String?
+  isBanned          Boolean  @default(false)
+  isRestricted      Boolean  @default(false)
+  lastSeenAt        DateTime @default(now())
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -85,6 +100,10 @@ model User {
   auditLogsAsActor  AuditLog[] @relation("ActorAuditLogs")
   reviewedWithdrawals WithdrawalRequest[] @relation("ReviewedWithdrawals")
   reviewedKycSubmissions KycSubmission[] @relation("ReviewedKycSubmissions")
+  supportTickets    SupportTicket[] @relation("UserTickets")
+  assignedTickets   SupportTicket[] @relation("AdminTickets")
+  supportMessages   SupportMessage[]
+  chatMessages      ChatMessage[]
 
   @@index([email])
   @@index([kycStatus])
@@ -281,4 +300,49 @@ model KycSubmission {
   @@index([status])
   @@index([reviewedBy])
   @@index([providerReference])
+}
+
+model SupportTicket {
+  id          String       @id @default(uuid())
+  userId      String
+  subject     String
+  status      TicketStatus @default(OPEN)
+  priority    String       @default("LOW")
+  assignedTo  String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user        User             @relation("UserTickets", fields: [userId], references: [id], onDelete: Cascade)
+  admin       User?            @relation("AdminTickets", fields: [assignedTo], references: [id])
+  messages    SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SupportMessage {
+  id        String   @id @default(uuid())
+  ticketId  String
+  userId    String
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  role      ChatRole
+  text      String   @db.Text
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }

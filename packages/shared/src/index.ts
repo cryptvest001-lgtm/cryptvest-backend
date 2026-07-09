@@ -48,6 +48,17 @@ export enum WithdrawalSourceType {
   EARNINGS = "EARNINGS",
 }
 
+export enum TicketStatus {
+  OPEN = "OPEN",
+  PENDING = "PENDING",
+  CLOSED = "CLOSED",
+}
+
+export enum ChatRole {
+  USER = "USER",
+  ADMIN = "ADMIN",
+}
+
 export const SUPPORTED_ASSET_NETWORKS: Record<Asset, Network[]> = {
   [Asset.BTC]: [Network.BTC],
   [Asset.USDT]: [Network.ERC20],

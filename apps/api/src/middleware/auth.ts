@@ -13,29 +13,70 @@ function getToken(req: Request) {
   return header?.startsWith("Bearer ") ? header.slice(7) : null;
 }
 
-export function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
+export function requireAuth(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   const token = getToken(req);
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwtSecret) as { sub: string; role: string };
-    req.user = { id: decoded.sub, role: decoded.role };
-    next();
+    const decoded = jwt.verify(token, config.jwtSecret) as {
+      sub: string;
+      role: string;
+    };
+
+    // Check if user is banned
+    prisma.user
+      .findUnique({
+        where: { id: decoded.sub },
+        select: { isBanned: true, lastSeenAt: true },
+      })
+      .then((user) => {
+        if (!user) return res.status(401).json({ error: "User not found" });
+        if (user.isBanned)
+          return res
+            .status(403)
+            .json({ error: "Your account has been banned" });
+
+        // Update last seen
+        prisma.user
+          .update({
+            where: { id: decoded.sub },
+            data: { lastSeenAt: new Date() },
+          })
+          .catch(console.error);
+
+        req.user = { id: decoded.sub, role: decoded.role };
+        next();
+      })
+      .catch((err) => {
+        console.error("requireAuth error:", err);
+        return res.status(500).json({ error: "Internal server error" });
+      });
   } catch {
     return res.status(401).json({ error: "Invalid token" });
   }
 }
 
-export function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunction) {
+export function requireAdminAuth(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   const token = getToken(req);
   if (!token) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
   try {
-    const decoded = jwt.verify(token, config.jwtAdminSecret) as { sub: string; role: string };
+    const decoded = jwt.verify(token, config.jwtAdminSecret) as {
+      sub: string;
+      role: string;
+    };
     if (decoded.role !== Role.ADMIN) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -46,14 +87,22 @@ export function requireAdminAuth(req: AuthRequest, res: Response, next: NextFunc
   }
 }
 
-export function requireAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+export function requireAdmin(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   if (req.user?.role !== Role.ADMIN) {
     return res.status(403).json({ error: "Forbidden" });
   }
   next();
 }
 
-export async function requireKyc(req: AuthRequest, res: Response, next: NextFunction) {
+export async function requireKyc(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
   if (!req.user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
@@ -65,6 +114,28 @@ export async function requireKyc(req: AuthRequest, res: Response, next: NextFunc
 
   if (user?.kycStatus !== KycStatus.APPROVED) {
     return res.status(403).json({ error: "KYC approval required" });
+  }
+
+  next();
+}
+
+export async function requireNotRestricted(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+
+  const user = await prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { isRestricted: true },
+  });
+
+  if (user?.isRestricted) {
+    return res.status(403).json({
+      error:
+        "Your account is currently restricted from performing this action.",
+    });
   }
 
   next();

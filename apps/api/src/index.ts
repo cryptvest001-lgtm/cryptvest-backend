@@ -9,11 +9,19 @@ import { authRouter } from "./routes/auth";
 import { adminAuthRouter } from "./routes/admin-auth";
 import { kycRouter, kycWebhookRouter } from "./routes/kyc";
 import { adminRouter } from "./routes/admin";
+import { supportRouter, adminSupportRouter } from "./routes/support";
 import { depositsRouter } from "./routes/deposits";
 import { stakesRouter, adminStakesRouter } from "./routes/stakes";
-import { withdrawalsRouter, adminWithdrawalsRouter } from "./routes/withdrawals";
+import {
+  withdrawalsRouter,
+  adminWithdrawalsRouter,
+} from "./routes/withdrawals";
 import { activityRouter } from "./routes/activity";
-import { requireAuth, requireKyc } from "./middleware/auth";
+import {
+  requireAuth,
+  requireKyc,
+  requireNotRestricted,
+} from "./middleware/auth";
 import { startPollingCrons } from "./lib/polling";
 import { startAccrualCron } from "./lib/accrual";
 
@@ -29,20 +37,35 @@ app.use("/admin/auth", adminAuthRouter);
 app.use("/kyc/webhook", kycWebhookRouter);
 app.use("/kyc", requireAuth, kycRouter);
 app.use("/deposits", requireAuth, depositsRouter);
-app.use("/stakes", requireAuth, requireKyc, stakesRouter);
-app.use("/withdrawals", requireAuth, requireKyc, withdrawalsRouter);
+app.use("/stakes", requireAuth, requireKyc, requireNotRestricted, stakesRouter);
+app.use(
+  "/withdrawals",
+  requireAuth,
+  requireKyc,
+  requireNotRestricted,
+  withdrawalsRouter,
+);
 app.use("/activity", requireAuth, activityRouter);
+app.use("/support", supportRouter);
 app.use("/admin", adminRouter);
 app.use("/admin/stakes", adminStakesRouter);
 app.use("/admin/withdrawals", adminWithdrawalsRouter);
+app.use("/admin/support", adminSupportRouter);
 
 startPollingCrons();
 startAccrualCron();
 
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
-  res.status(500).json({ error: "Internal server error" });
-});
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error" });
+  },
+);
 
 const server = app.listen(config.port, () => {
   console.log(`API listening on port ${config.port}`);

@@ -60,7 +60,9 @@ export async function sendKycDecisionEmail(
   const approved = status === "APPROVED";
   await sendEmail({
     to: email,
-    subject: approved ? "KYC Approved — You can now stake and withdraw" : "KYC Review Update",
+    subject: approved
+      ? "KYC Approved — You can now stake and withdraw"
+      : "KYC Review Update",
     html: approved
       ? `<h2>Identity Verified</h2><p>Your KYC has been approved. You can now stake and request withdrawals.</p><p><a href="${config.webOrigin}/stake">Start staking</a></p>`
       : `<h2>KYC Not Approved</h2><p>Unfortunately your KYC submission was not approved.${reason ? ` Reason: ${reason}` : ""}</p><p>You may re-submit with updated documents.</p><p><a href="${config.webOrigin}/kyc">Re-submit KYC</a></p>`,
@@ -89,5 +91,24 @@ export async function sendWithdrawalStatusEmail(
     to: email,
     subject: labels[status] ?? "Withdrawal Update",
     html: `<h2>${labels[status]}</h2><p>${body[status]}</p><p><a href="${config.webOrigin}/activity">View activity</a></p>`,
+  });
+}
+
+export async function sendCustomEmail(
+  email: string,
+  subject: string,
+  message: string,
+) {
+  await sendEmail({
+    to: email,
+    subject: subject,
+    html: `
+      <div style="font-family: sans-serif; line-height: 1.6; color: #333;">
+        <h2 style="color: #00f0ff;">Message from Cryptvest Support</h2>
+        <p>${message.replace(/\n/g, "<br>")}</p>
+        <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+        <p style="font-size: 12px; color: #666;">This is an automated notification from your Cryptvest account.</p>
+      </div>
+    `,
   });
 }
