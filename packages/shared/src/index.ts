@@ -31,6 +31,12 @@ export enum StakeStatus {
   WITHDRAWN = "WITHDRAWN",
 }
 
+export enum StakeRequestStatus {
+  PENDING = "PENDING",
+  APPROVED = "APPROVED",
+  REJECTED = "REJECTED",
+}
+
 export enum DepositStatus {
   PENDING = "PENDING",
   CONFIRMED = "CONFIRMED",
