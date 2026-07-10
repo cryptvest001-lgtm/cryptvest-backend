@@ -41,12 +41,6 @@ enum StakeStatus {
   WITHDRAWN
 }
 
-enum StakeRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
 enum DepositStatus {
   PENDING
   CONFIRMED
@@ -98,7 +92,6 @@ model User {
   depositAddresses  DepositAddress[]
   deposits          Deposit[]
   stakes            Stake[]
-  stakeRequests     StakeRequest[] @relation("UserStakeRequests")
   withdrawalRequests WithdrawalRequest[]
   balanceLedgerEntries BalanceLedgerEntry[]
   userBalances      UserBalance[]
@@ -106,7 +99,6 @@ model User {
   kycSubmissions    KycSubmission[]
   auditLogsAsActor  AuditLog[] @relation("ActorAuditLogs")
   reviewedWithdrawals WithdrawalRequest[] @relation("ReviewedWithdrawals")
-  reviewedStakeRequests StakeRequest[] @relation("ReviewedStakeRequests")
   reviewedKycSubmissions KycSubmission[] @relation("ReviewedKycSubmissions")
   supportTickets    SupportTicket[] @relation("UserTickets")
   assignedTickets   SupportTicket[] @relation("AdminTickets")
@@ -197,7 +189,6 @@ model StakePlan {
   updatedAt              DateTime      @updatedAt
 
   stakes Stake[]
-  stakeRequests StakeRequest[]
 
   @@index([active])
   @@index([type])
@@ -223,29 +214,6 @@ model Stake {
   @@index([userId])
   @@index([status])
   @@index([stakePlanId])
-}
-
-model StakeRequest {
-  id          String             @id @default(uuid())
-  userId      String
-  stakePlanId String
-  asset       Asset
-  amount      Decimal            @db.Decimal(28, 18)
-  status      StakeRequestStatus @default(PENDING)
-  reviewedBy  String?
-  reviewedAt  DateTime?
-  reason      String?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-
-  user      User      @relation("UserStakeRequests", fields: [userId], references: [id], onDelete: Cascade)
-  reviewer  User?     @relation("ReviewedStakeRequests", fields: [reviewedBy], references: [id], onDelete: SetNull)
-  stakePlan StakePlan @relation(fields: [stakePlanId], references: [id], onDelete: Restrict)
-
-  @@index([userId])
-  @@index([stakePlanId])
-  @@index([status])
-  @@index([reviewedBy])
 }
 
 model EarningsLedgerEntry {

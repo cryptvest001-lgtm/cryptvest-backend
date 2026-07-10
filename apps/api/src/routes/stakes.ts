@@ -1,7 +1,7 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import { prisma, Prisma } from "@cryptvest/db";
-import { Asset, StakeRequestStatus, StakeStatus } from "@cryptvest/shared";
+import { Asset, StakeStatus } from "@cryptvest/shared";
 import { audit } from "../lib/audit";
 import { requireAdminAuth, type AuthRequest } from "../middleware/auth";
 
@@ -33,8 +33,8 @@ const stakeSchema = z.object({
   amount: z.number().positive(),
 });
 
-const stakeRequestDecisionSchema = z.object({
-  status: z.enum(["APPROVED", "REJECTED"]),
+const adminStakeSchema = stakeSchema.extend({
+  email: z.string().email(),
   reason: z.string().optional(),
 });
 
@@ -109,54 +109,6 @@ stakesRouter.get("/my", async (req: AuthRequest, res: Response) => {
     orderBy: { createdAt: "desc" },
   });
   return res.json({ stakes });
-});
-
-stakesRouter.get("/requests/my", async (req: AuthRequest, res: Response) => {
-  const requests = await prisma.stakeRequest.findMany({
-    where: { userId: req.user!.id },
-    include: { stakePlan: { select: { name: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
-  return res.json({ requests });
-});
-
-stakesRouter.post("/requests", async (req: AuthRequest, res: Response) => {
-  const parse = stakeSchema.safeParse(req.body);
-  if (!parse.success) {
-    return res.status(400).json({ error: "Invalid input" });
-  }
-
-  const { stakePlanId, asset, amount } = parse.data;
-  const userId = req.user!.id;
-
-  const plan = await prisma.stakePlan.findUnique({ where: { id: stakePlanId } });
-  if (!plan || !plan.active) {
-    return res.status(404).json({ error: "Stake plan not found or inactive" });
-  }
-
-  const balance = await prisma.userBalance.findUnique({
-    where: { userId_asset: { userId, asset } },
-  });
-
-  if (!balance || Number(balance.available) < amount) {
-    return res.status(400).json({ error: "Insufficient available balance" });
-  }
-
-  const request = await prisma.stakeRequest.create({
-    data: { userId, stakePlanId, asset, amount },
-    include: { stakePlan: { select: { name: true } } },
-  });
-
-  await audit({
-    actorId: userId,
-    action: "STAKE_REQUESTED",
-    targetType: "StakeRequest",
-    targetId: request.id,
-    metadata: { stakePlanId, asset, amount },
-  });
-
-  return res.status(201).json({ request });
 });
 
 stakesRouter.post("/", async (req: AuthRequest, res: Response) => {
@@ -267,97 +219,45 @@ adminStakesRouter.get("/plans", async (_req, res: Response) => {
   return res.json({ plans });
 });
 
-adminStakesRouter.get("/requests", async (_req, res: Response) => {
-  const requests = await prisma.stakeRequest.findMany({
-    where: { status: StakeRequestStatus.PENDING },
-    include: {
-      user: { select: { id: true, email: true } },
-      stakePlan: { select: { name: true, type: true, dailyRatePercent: true } },
-    },
-    orderBy: { createdAt: "asc" },
-  });
-  return res.json({ requests });
-});
-
 adminStakesRouter.post(
-  "/requests/:id/decision",
+  "/users",
   async (req: AuthRequest, res: Response) => {
-    const parse = stakeRequestDecisionSchema.safeParse(req.body);
+    const parse = adminStakeSchema.safeParse(req.body);
     if (!parse.success) {
       return res.status(400).json({ error: "Invalid input" });
     }
 
-    const { status, reason } = parse.data;
-    const request = await prisma.stakeRequest.findUnique({
-      where: { id: req.params.id },
-      include: { stakePlan: true },
+    const { email, stakePlanId, asset, amount, reason } = parse.data;
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true },
     });
-    if (!request) return res.status(404).json({ error: "Request not found" });
-    if (request.status !== StakeRequestStatus.PENDING) {
-      return res.status(409).json({ error: "Request already decided" });
-    }
-
-    if (status === "REJECTED") {
-      const rejected = await prisma.stakeRequest.update({
-        where: { id: request.id },
-        data: {
-          status: StakeRequestStatus.REJECTED,
-          reason,
-          reviewedBy: req.user?.id,
-          reviewedAt: new Date(),
-        },
-      });
-
-      await audit({
-        actorId: req.user?.id,
-        action: "STAKE_REQUEST_REJECTED",
-        targetType: "StakeRequest",
-        targetId: request.id,
-        metadata: { reason },
-      });
-
-      return res.json({ request: rejected });
-    }
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     try {
-      const result = await prisma.$transaction(
-        async (tx: Prisma.TransactionClient) => {
-          const stake = await createStakeForUser(
-            tx,
-            request.userId,
-            request.stakePlanId,
-            request.asset,
-            Number(request.amount),
-            "STAKE_REQUEST_APPROVED",
-            request.id,
-          );
-
-          const approved = await tx.stakeRequest.update({
-            where: { id: request.id },
-            data: {
-              status: StakeRequestStatus.APPROVED,
-              reason,
-              reviewedBy: req.user?.id,
-              reviewedAt: new Date(),
-            },
-          });
-
-          return { stake, request: approved };
-        },
+      const stake = await prisma.$transaction((tx: Prisma.TransactionClient) =>
+        createStakeForUser(
+          tx,
+          user.id,
+          stakePlanId,
+          asset,
+          amount,
+          "ADMIN_STAKE",
+          req.user?.id,
+        ),
       );
 
       await audit({
         actorId: req.user?.id,
-        action: "STAKE_REQUEST_APPROVED",
-        targetType: "StakeRequest",
-        targetId: request.id,
-        metadata: { stakeId: result.stake.id, reason },
+        action: "ADMIN_STAKE_CREATED",
+        targetType: "Stake",
+        targetId: stake.id,
+        metadata: { userId: user.id, email, stakePlanId, asset, amount, reason },
       });
 
-      return res.json(result);
+      return res.status(201).json({ stake });
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to approve stake request";
+      const message = err instanceof Error ? err.message : "Failed to stake";
       if (
         message === "Insufficient available balance" ||
         message === "Stake plan not found or inactive"
