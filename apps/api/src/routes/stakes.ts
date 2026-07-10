@@ -18,7 +18,12 @@ const createPlanSchema = z.object({
   earlyExitPenaltyPercent: z.number().min(0).max(100).optional(),
 });
 
-const updatePlanSchema = createPlanSchema.partial().extend({
+const updatePlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  type: z.enum(["FLEXIBLE", "LOCKED"]).optional(),
+  termDays: z.number().int().positive().nullable().optional(),
+  dailyRatePercent: z.number().positive().optional(),
+  earlyExitPenaltyPercent: z.number().min(0).max(100).nullable().optional(),
   active: z.boolean().optional(),
 });
 

@@ -1,7 +1,13 @@
 import { Router, type Response } from "express";
 import { z } from "zod";
 import { prisma } from "@cryptvest/db";
-import { Asset, KycStatus, Network, DepositStatus } from "@cryptvest/shared";
+import {
+  Asset,
+  KycStatus,
+  Network,
+  DepositStatus,
+  StakeStatus,
+} from "@cryptvest/shared";
 import { audit } from "../lib/audit";
 import {
   sendKycDecisionEmail,
@@ -285,6 +291,12 @@ const balanceAdjustSchema = z.object({
   reason: z.string().optional(),
 });
 
+const earningsAdjustSchema = z.object({
+  asset: z.nativeEnum(Asset),
+  amount: z.number().positive(),
+  reason: z.string().optional(),
+});
+
 adminRouter.post(
   "/users/:id/balance",
   async (req: AuthRequest, res: Response) => {
@@ -335,6 +347,61 @@ adminRouter.post(
       targetType: "User",
       targetId: userId,
       metadata: { asset, amount, reason },
+    });
+
+    return res.json({ success: true });
+  },
+);
+
+adminRouter.post(
+  "/users/:id/earnings",
+  async (req: AuthRequest, res: Response) => {
+    const parse = earningsAdjustSchema.safeParse(req.body);
+    if (!parse.success) return res.status(400).json({ error: "Invalid input" });
+
+    const { asset, amount, reason } = parse.data;
+    const userId = req.params.id;
+
+    const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!targetUser) return res.status(404).json({ error: "User not found" });
+
+    const stake = await prisma.stake.findFirst({
+      where: { userId, asset, status: StakeStatus.ACTIVE },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!stake) {
+      return res.status(400).json({
+        error: "User has no active stake for this asset to credit earnings.",
+      });
+    }
+
+    await prisma.$transaction([
+      prisma.earningsLedgerEntry.create({
+        data: { stakeId: stake.id, amount },
+      }),
+      prisma.stake.update({
+        where: { id: stake.id },
+        data: { accruedEarnings: { increment: amount } },
+      }),
+      prisma.balanceLedgerEntry.create({
+        data: {
+          userId,
+          asset,
+          amount,
+          entryType: "CREDIT",
+          sourceType: "ADMIN_EARNINGS",
+          sourceId: req.user?.id,
+        },
+      }),
+    ]);
+
+    await audit({
+      actorId: req.user?.id,
+      action: "ADMIN_EARNINGS_CREDIT",
+      targetType: "Stake",
+      targetId: stake.id,
+      metadata: { userId, asset, amount, reason },
     });
 
     return res.json({ success: true });
